@@ -1,0 +1,6 @@
+{
+  "name": "Platform Admin Governance",
+  "description": "Comprehensive platform administration, tenant governance, infrastructure monitoring, security control center, and audit system.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

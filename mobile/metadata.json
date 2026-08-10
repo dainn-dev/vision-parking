@@ -1,0 +1,6 @@
+{
+  "name": "Vision Parking",
+  "description": "Smart Parking Platform - Member App for finding parking, indoor navigation, memberships, and real-time spot tracking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
