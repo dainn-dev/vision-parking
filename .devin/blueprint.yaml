@@ -1,0 +1,15 @@
+# Devin environment blueprint — https://docs.devin.ai/onboard-devin/environment-yaml
+initialize: |
+  (cd backend && python3 -m venv .venv)
+maintenance: |
+  (cd backend && .venv/bin/pip install -e ".[dev]")
+knowledge:
+  - name: lint
+    contents: |
+      (cd backend && .venv/bin/ruff check app alembic tests)
+  - name: test
+    contents: |
+      (cd backend && .venv/bin/python -m pytest tests -q)
+  - name: dev stack
+    contents: |
+      (cd backend && docker compose up --build -d)  # api :8000, rustfs :9001, mailpit :8025, emqx :1883

@@ -1,0 +1,146 @@
+name: vision-parking-backend
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: vmp
+      POSTGRES_PASSWORD: vmp_dev_password
+      POSTGRES_DB: vision_parking
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vmp -d vision_parking"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  emqx:
+    image: emqx/emqx:5.8
+    environment:
+      EMQX_DASHBOARD__DEFAULT_USERNAME: admin
+      EMQX_DASHBOARD__DEFAULT_PASSWORD: public_dev
+      EMQX_ALLOW_ANONYMOUS: "true"
+    ports:
+      - "1883:1883"     # MQTT
+      - "8883:8883"     # MQTT/TLS
+      - "8083:8083"     # MQTT/WS
+      - "18083:18083"   # Dashboard
+    healthcheck:
+      test: ["CMD", "/opt/emqx/bin/emqx", "ctl", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  # S3-compatible object store (RustFS — API-compatible stand-in for MinIO,
+  # whose Docker Hub image was delisted; the minio SDK talks plain S3)
+  minio:
+    image: rustfs/rustfs:latest
+    command: ["/data"]
+    environment:
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_ACCESS_KEY: minioadmin
+      RUSTFS_SECRET_KEY: minioadmin_dev
+      RUSTFS_UNSAFE_BYPASS_DISK_CHECK: "true"
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Console
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "1025:1025"   # SMTP
+      - "8025:8025"   # Web UI
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8025/api/v1/messages"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # app runs as vmp_app (bound by FORCE RLS); migrations as the vmp superuser
+      DATABASE_URL: postgresql+asyncpg://vmp_app:vmp_app_dev_password@postgres:5432/vision_parking
+      ALEMBIC_DATABASE_URL: postgresql+asyncpg://vmp:vmp_dev_password@postgres:5432/vision_parking
+      REDIS_URL: redis://redis:6379/0
+      MQTT_HOST: emqx
+      MQTT_PORT: "1883"
+      S3_ENDPOINT: http://minio:9000
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+    command: >
+      sh -c "alembic upgrade head &&
+             python -m app.seed &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      emqx:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  worker:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+asyncpg://vmp_app:vmp_app_dev_password@postgres:5432/vision_parking
+      REDIS_URL: redis://redis:6379/0
+      MQTT_HOST: emqx
+      MQTT_PORT: "1883"
+      S3_ENDPOINT: http://minio:9000
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+    command: arq app.worker.settings.WorkerSettings
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mailpit:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:
